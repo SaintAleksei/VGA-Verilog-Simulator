@@ -13,3 +13,6 @@ demo: demo.vvp vgasim.vpi
 
 %.vvp: %.v
 	iverilog $< -o $@
+
+clean:
+	rm -rf *.o *.vpi *.vvp
