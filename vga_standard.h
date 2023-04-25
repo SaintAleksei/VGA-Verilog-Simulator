@@ -9,9 +9,9 @@ typedef struct
   uint16_t hor_sync_pulse;
   uint16_t hor_back_porch;
   uint16_t ver_res;
-  uint16_t hor_front_porch;
-  uint16_t hor_sync_pulse;
-  uint16_t hor_back_porch;
+  uint16_t ver_front_porch;
+  uint16_t ver_sync_pulse;
+  uint16_t ver_back_porch;
   char     id;
 } vga_standard_t;
 
