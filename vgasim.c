@@ -1,15 +1,23 @@
 #include <vpi_user.h>
 #include <SDL.h>
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+
+#include <vga_standard.h>
+
 
 // SA: It is used to exclude useless for my own purposes code
 #define SA_EXCLUDE 1
 
 typedef struct
 {
-  SDL_Surface *surface;
+  SDL_Window *window;
+  SDL_Renderer *renderer;
+  SDL_Texture *texture;
+  //vga_standard_t *vga_standard;
+  uint32_t *video_buffer;
   vpiHandle red;
   vpiHandle green;
   vpiHandle blue;
@@ -19,8 +27,10 @@ typedef struct
   uint32_t rmax;
   uint32_t gmax;
   uint32_t bmax;
-  uint32_t x;
-  uint32_t y;
+  uint32_t width;
+  uint32_t heigh;
+  uint32_t hor_cnt;
+  uint32_t ver_cnt;
   uint32_t last_time;
 } pixel_clock_cb_data_t;
 
@@ -135,21 +145,9 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
   int phys_y = y + offset_y;
 #endif
 
-  // If we're in bounds, draw a pixel.
-  if (cb_ctx->x < cb_ctx->surface->w && 
-      cb_ctx->y < cb_ctx->surface->h) {
-    print_time("Before lock");
-    SDL_LockSurface(cb_ctx->surface);
-    print_time("After lock");
-    uint32_t pixel_value = (
-      rval << cb_ctx->surface->format->Rshift |
-      gval << cb_ctx->surface->format->Gshift |
-      bval << cb_ctx->surface->format->Bshift
-    );
-    unsigned offset = (cb_ctx->y * (cb_ctx->surface->pitch / 4)) + cb_ctx->x;
-    ((uint32_t*)cb_ctx->surface->pixels)[offset] = pixel_value;
-    SDL_UnlockSurface(cb_ctx->surface);
-  }
+  uint32_t pixel_value = rval << 24 | gval << 16 | bval << 8 | 0xFF;
+  size_t offset = cb_ctx->heigh * cb_ctx->ver_cnt + cb_ctx->hor_cnt;
+  cb_ctx->video_buffer[offset] = pixel_value;
 
 #if !SA_EXCLUDE
   vpi_get_value(hsync, &value);
@@ -186,17 +184,22 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
   in_vsync = new_vsync;
 #endif
 
-  cb_ctx->x++;
-  if (cb_ctx->x == cb_ctx->surface->w)
-    cb_ctx->x = 0;
+  cb_ctx->hor_cnt++;
+  if (cb_ctx->hor_cnt == cb_ctx->width)
+    cb_ctx->hor_cnt = 0;
 
-  if (cb_ctx->x == 0)
-    cb_ctx->y++;
+  if (cb_ctx->hor_cnt == 0)
+    cb_ctx->ver_cnt++;;
 
-  if (cb_ctx->y == cb_ctx->surface->h)
+  if (cb_ctx->ver_cnt == cb_ctx->width)
   {
-    SDL_Flip(cb_ctx->surface);
-    cb_ctx->y = 0;
+    SDL_UpdateTexture(cb_ctx->texture, NULL, 
+                      cb_ctx->video_buffer,
+                      cb_ctx->width * sizeof(uint32_t));
+    SDL_RenderClear(cb_ctx->renderer);
+    SDL_RenderCopy(cb_ctx->renderer, cb_ctx->texture, NULL, NULL);
+    SDL_RenderPresent(cb_ctx->renderer);
+    cb_ctx->ver_cnt = 0;
   }
 
   // Take an opportunity to poll for events.
@@ -230,10 +233,19 @@ static int vgasim_init_calltf(char *user_data) {
 
   arg = vpi_scan(args_iter);
   vpi_get_value(arg, &argval);
-  uint32_t width = argval.value.integer;
+  cb_ctx->width = argval.value.integer;
   arg = vpi_scan(args_iter);
   vpi_get_value(arg, &argval);
-  uint32_t height = argval.value.integer;
+  cb_ctx->heigh = argval.value.integer;
+
+  cb_ctx->video_buffer = calloc(cb_ctx->width * cb_ctx->heigh,
+                                sizeof(*cb_ctx->video_buffer));
+  if (!cb_ctx->video_buffer)
+  {
+    vpi_printf("ERROR: Can\'t allocate memory for video buffer\n");
+    free(cb_ctx);
+    return 0;
+  }
 
   cb_ctx->red   = vpi_scan(args_iter);
   cb_ctx->green = vpi_scan(args_iter);
@@ -244,19 +256,50 @@ static int vgasim_init_calltf(char *user_data) {
 
   vpi_free_object(args_iter);
 
-  SDL_Surface *surface = SDL_SetVideoMode(width, height, 32, SDL_SWSURFACE);
-  if (!surface)
+  SDL_Window *window = SDL_CreateWindow("VGA Verilog Simulator",
+                                        SDL_WINDOWPOS_UNDEFINED,
+                                        SDL_WINDOWPOS_UNDEFINED,
+                                        cb_ctx->width, cb_ctx->heigh,
+                                        SDL_WINDOW_SHOWN);
+  if (!window)
   {
     vpi_printf("ERROR: Can\'t create window\n");
+    free(cb_ctx->video_buffer);
     free(cb_ctx);
     return 0;
   }
   
-  cb_ctx->surface = surface;
+  cb_ctx->window = window;
 
+  SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+  if (!renderer)
+  {
+    vpi_printf("ERROR: Can\'t create renderer\n");
+    SDL_DestroyWindow(cb_ctx->window);
+    free(cb_ctx->video_buffer);
+    free(cb_ctx);
+    return 0;
+  }
+
+  cb_ctx->renderer = renderer;
+
+  SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                           SDL_TEXTUREACCESS_STREAMING,
+                                           cb_ctx->width, cb_ctx->heigh);
+  if (!texture)
+  {
+    vpi_printf("ERROR: Can\'t create texture\n");
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    free(cb_ctx->video_buffer);
+    free(cb_ctx);
+    return 0;
+  }
+
+  cb_ctx->texture = texture;
 
   s_cb_data cb_config;
-  struct t_vpi_time time;
+  s_vpi_time time;
   time.type = vpiSimTime;
   cb_config.user_data = cb_ctx;
   cb_config.reason = cbValueChange;
