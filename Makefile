@@ -1,5 +1,5 @@
-SDL_LDFLAGS := $(shell sdl-config --libs)
-SDL_CCFLAGS := $(shell sdl-config --cflags)
+SDL_LDFLAGS := $(shell sdl2-config --libs)
+SDL_CCFLAGS := $(shell sdl2-config --cflags)
 CCFLAGS     := -I.
 VVPFLAGS    := -M. -mvgasim
 
