@@ -42,9 +42,11 @@ typedef struct
   uint32_t hor_back_porch_start;
   uint32_t hor_data_start;
   uint32_t hor_front_porch_start;
+  uint32_t hor_max;
   uint32_t ver_back_porch_start;
   uint32_t ver_data_start;
   uint32_t ver_front_porch_start;
+  uint32_t ver_max;
 } pixel_clock_cb_data_t;
 
 static void vgasim_events() {
@@ -64,6 +66,8 @@ static void vgasim_events() {
 }
 
 static int vgasim_pixel_cb(s_cb_data *cb_data) {
+  // Take an opportunity to poll for events.
+  vgasim_events();
   // Only draw a pixel on a rising pixel clock.
   if (! cb_data->value->value.integer) {
     return 0;
@@ -80,13 +84,15 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
   vpi_get_value(cb_ctx->vsync, &value);
   vsync = value.value.integer;
 
+#if 0
   vpi_printf("vgasim: %d;%d;%d;%d;\n", cb_ctx->hor_cnt, cb_ctx->ver_cnt, hsync, vsync);
+#endif
 
   // Check for VGA standard, reset if failed
-  if ((cb_ctx->hor_cnt < cb_ctx->hor_back_porch_start && hsync) ||
+  if ((cb_ctx->hor_cnt < cb_ctx->hor_back_porch_start && hsync)   ||
       (cb_ctx->hor_cnt >= cb_ctx->hor_back_porch_start && !hsync) ||
-      (cb_ctx->ver_cnt < cb_ctx->ver_back_porch_start && hsync) ||
-      (cb_ctx->ver_cnt >= cb_ctx->ver_back_porch_start && !hsync))
+      (cb_ctx->ver_cnt < cb_ctx->ver_back_porch_start && vsync)   ||
+      (cb_ctx->ver_cnt >= cb_ctx->ver_back_porch_start && !vsync))
   {
     cb_ctx->hor_cnt = 0;
     cb_ctx->ver_cnt = 0; 
@@ -94,9 +100,9 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
     return 0;
   }
 
-  if ((cb_ctx->hor_cnt >= cb_ctx->hor_data_start  &&
+  if ((cb_ctx->hor_cnt >= cb_ctx->hor_data_start        &&
        cb_ctx->hor_cnt < cb_ctx->hor_front_porch_start) &&
-      (cb_ctx->ver_cnt >= cb_ctx->ver_data_start  &&
+      (cb_ctx->ver_cnt >= cb_ctx->ver_data_start        &&
        cb_ctx->ver_cnt < cb_ctx->ver_front_porch_start))
   {
     unsigned int rval, gval, bval;
@@ -121,7 +127,7 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
   }
 
   cb_ctx->hor_cnt++;
-  if (cb_ctx->hor_cnt == cb_ctx->width)
+  if (cb_ctx->hor_cnt == cb_ctx->hor_max)
     cb_ctx->hor_cnt = 0;
 
   if (cb_ctx->hor_cnt == 0)
@@ -136,11 +142,8 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
     cb_ctx->ver_cnt++;;
   }
 
-  if (cb_ctx->ver_cnt == cb_ctx->width)
+  if (cb_ctx->ver_cnt == cb_ctx->ver_max)
     cb_ctx->ver_cnt = 0;
-
-  // Take an opportunity to poll for events.
-  vgasim_events();
 
   return 0;
 }
@@ -233,11 +236,15 @@ static int vgasim_init_calltf(char *user_data) {
                                   vga_standard.hor_back_porch;
   cb_ctx->hor_front_porch_start = cb_ctx->hor_data_start + 
                                   vga_standard.hor_res;
+  cb_ctx->hor_max               = cb_ctx->hor_front_porch_start +
+                                  vga_standard.hor_front_porch;
   cb_ctx->ver_back_porch_start  = vga_standard.ver_sync_pulse;
   cb_ctx->ver_data_start        = cb_ctx->ver_back_porch_start +
                                   vga_standard.ver_back_porch;
   cb_ctx->ver_front_porch_start = cb_ctx->ver_data_start + 
                                   vga_standard.ver_res;
+  cb_ctx->ver_max               = cb_ctx->ver_front_porch_start +
+                                  vga_standard.ver_front_porch;
 
   s_cb_data cb_config;
   s_vpi_time time;
