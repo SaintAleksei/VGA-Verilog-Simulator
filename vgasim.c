@@ -7,16 +7,24 @@
 
 #include <vga_standard.h>
 
-
-// SA: It is used to exclude useless for my own purposes code
-#define SA_EXCLUDE 1
+const vga_standard_t vga_standard =
+{
+  .id = "640x480_60Hz",
+  .hor_res = 640,
+  .ver_res = 480,
+  .hor_front_porch = 16,
+  .hor_sync_pulse = 96,
+  .hor_back_porch = 48,
+  .ver_front_porch = 10,
+  .ver_sync_pulse = 2,
+  .ver_back_porch = 33
+};
 
 typedef struct
 {
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *texture;
-  //vga_standard_t *vga_standard;
   uint32_t *video_buffer;
   vpiHandle red;
   vpiHandle green;
@@ -31,14 +39,13 @@ typedef struct
   uint32_t heigh;
   uint32_t hor_cnt;
   uint32_t ver_cnt;
-  uint32_t last_time;
+  uint32_t hor_back_porch_start;
+  uint32_t hor_data_start;
+  uint32_t hor_front_porch_start;
+  uint32_t ver_back_porch_start;
+  uint32_t ver_data_start;
+  uint32_t ver_front_porch_start;
 } pixel_clock_cb_data_t;
-
-#if !SA_EXCLUDE
-int offset_x = 0, offset_y = 0;
-int offset_delta_x = 0, offset_delta_y = 0;
-int clocks_until_update_offset = 0;
-#endif
 
 static void vgasim_events() {
   // Allow the simulation to be ended by closing the SDL window.
@@ -50,39 +57,10 @@ static void vgasim_events() {
         // SA: FIXME: Finish only current screen
         vpi_sim_control(vpiFinish, 0);
         break;
-#if !SA_EXCLUDE
-      case SDL_KEYDOWN:
-        switch (event.key.keysym.sym) {
-          case 273: // UP
-            offset_delta_y = -1; break;
-          case 274: // DOWN
-            offset_delta_y = 1; break;
-          case 276: // LEFT
-            offset_delta_x = -1; break;
-          case 275: // RIGHT
-            offset_delta_x = 1; break;
-        }
-        break;
-      case SDL_KEYUP:
-        offset_delta_x = 0;
-        offset_delta_y = 0;
-        break;
-#endif
       default:
         ;
     }
   }
-
-#if !SA_EXCLUDE
-  if (clocks_until_update_offset == 0) {
-    offset_x += offset_delta_x;
-    offset_y += offset_delta_y;
-    clocks_until_update_offset = 255;
-  }
-  else {
-    clocks_until_update_offset--;
-  }
-#endif
 }
 
 static int vgasim_pixel_cb(s_cb_data *cb_data) {
@@ -96,111 +74,70 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
   s_vpi_value value;
   value.format = vpiIntVal;
 
-#if !SA_EXCLUDE
-  SDL_Rect clear_rect;
-  clear_rect.x = 0;
-  clear_rect.y = 0;
-  clear_rect.w = width;
-  clear_rect.h = 1;
+  unsigned int hsync, vsync;
+  vpi_get_value(cb_ctx->hsync, &value);
+  hsync = value.value.integer;
+  vpi_get_value(cb_ctx->vsync, &value);
+  vsync = value.value.integer;
 
-  // For now we consider only the low clock, since we generally
-  // care only about differences anyway.
-  unsigned int time = cb_data->time->low;
-  unsigned int last_pclk_len = pclk_len;
-  pclk_len = time - last_time;
-  if (pclk_len != last_pclk_len) {
-    if (last_pclk_len > 0) {
-      vpi_printf(
-        "WARNING: Pixel clock period changed from %i to %i\n",
-        last_pclk_len, pclk_len
-      );
-    }
-    else {
-      vpi_printf(
-        "INFO: Pixel clock period is %i\n", pclk_len
-      );
-    }
+  vpi_printf("vgasim: %d;%d;%d;%d;\n", cb_ctx->hor_cnt, cb_ctx->ver_cnt, hsync, vsync);
+
+  // Check for VGA standard, reset if failed
+  if ((cb_ctx->hor_cnt < cb_ctx->hor_back_porch_start && hsync) ||
+      (cb_ctx->hor_cnt >= cb_ctx->hor_back_porch_start && !hsync) ||
+      (cb_ctx->ver_cnt < cb_ctx->ver_back_porch_start && hsync) ||
+      (cb_ctx->ver_cnt >= cb_ctx->ver_back_porch_start && !hsync))
+  {
+    cb_ctx->hor_cnt = 0;
+    cb_ctx->ver_cnt = 0; 
+
+    return 0;
   }
-  last_time = time;
-#endif
 
-  unsigned int rval, gval, bval;
+  if ((cb_ctx->hor_cnt >= cb_ctx->hor_data_start  &&
+       cb_ctx->hor_cnt < cb_ctx->hor_front_porch_start) &&
+      (cb_ctx->ver_cnt >= cb_ctx->ver_data_start  &&
+       cb_ctx->ver_cnt < cb_ctx->ver_front_porch_start))
+  {
+    unsigned int rval, gval, bval;
 
-  // Capture r, g and b to get the color value for this pixel.
-  vpi_get_value(cb_ctx->red, &value);
-  rval = value.value.integer;
-  vpi_get_value(cb_ctx->green, &value);
-  gval = value.value.integer;
-  vpi_get_value(cb_ctx->blue, &value);
-  bval = value.value.integer;
+    // Capture r, g and b to get the color value for this pixel.
+    vpi_get_value(cb_ctx->red, &value);
+    rval = value.value.integer;
+    vpi_get_value(cb_ctx->green, &value);
+    gval = value.value.integer;
+    vpi_get_value(cb_ctx->blue, &value);
+    bval = value.value.integer;
 
-  // Scale the values to 8 bits per channel.
-  // (We'll lose detail here if the source is >8 bits per channel)
-  rval = (rval * 255) / cb_ctx->rmax;
-  gval = (gval * 255) / cb_ctx->gmax;
-  bval = (bval * 255) / cb_ctx->bmax;
+    // Scale the values to 8 bits per channel.
+    // (We'll lose detail here if the source is >8 bits per channel)
+    rval = (rval * 255) / cb_ctx->rmax;
+    gval = (gval * 255) / cb_ctx->gmax;
+    bval = (bval * 255) / cb_ctx->bmax;
 
-#if !SA_EXCLUDE
-  int phys_x = x + offset_x;
-  int phys_y = y + offset_y;
-#endif
-
-  uint32_t pixel_value = rval << 24 | gval << 16 | bval << 8 | 0xFF;
-  size_t offset = cb_ctx->heigh * cb_ctx->ver_cnt + cb_ctx->hor_cnt;
-  cb_ctx->video_buffer[offset] = pixel_value;
-
-#if !SA_EXCLUDE
-  vpi_get_value(hsync, &value);
-  int new_hsync = ! value.value.integer;
-  vpi_get_value(vsync, &value);
-  int new_vsync = ! value.value.integer;
-  x++;
-  if (in_hsync && ! new_hsync) {
-    if ((x - 1) != line_len) {
-      if ((x - 1) > width) {
-        vpi_printf(
-          "WARNING: Line length is %i, but was expecting %i\n",
-          x - 1, width
-        );
-      }
-    }
-    line_len = x - 1;
-    x = 0;
-    // Update the screen every lines.
-    SDL_UpdateRect(surface, 0, y, width, 1);
-    y++;
-    if (y < height) {
-      clear_rect.y = y;
-      SDL_FillRect(
-        surface, &clear_rect, SDL_MapRGB(surface->format, 0, 0, 0)
-      );
-    }
+    uint32_t pixel_value = rval << 24 | gval << 16 | bval << 8 | 0xFF;
+    uint32_t x = cb_ctx->hor_cnt - cb_ctx->hor_data_start;
+    cb_ctx->video_buffer[x] = pixel_value;
   }
-  if (in_vsync && ! new_vsync) {
-    SDL_UpdateRect(surface, 0, 0, 0, 0);
-    y = 0;
-  }
-  in_hsync = new_hsync;
-  in_vsync = new_vsync;
-#endif
 
   cb_ctx->hor_cnt++;
   if (cb_ctx->hor_cnt == cb_ctx->width)
     cb_ctx->hor_cnt = 0;
 
   if (cb_ctx->hor_cnt == 0)
-    cb_ctx->ver_cnt++;;
-
-  if (cb_ctx->ver_cnt == cb_ctx->width)
   {
-    SDL_UpdateTexture(cb_ctx->texture, NULL, 
+    SDL_Rect update_rect = {0, cb_ctx->ver_cnt - cb_ctx->ver_data_start, cb_ctx->width, 1};
+    SDL_UpdateTexture(cb_ctx->texture, &update_rect,
                       cb_ctx->video_buffer,
                       cb_ctx->width * sizeof(uint32_t));
     SDL_RenderClear(cb_ctx->renderer);
     SDL_RenderCopy(cb_ctx->renderer, cb_ctx->texture, NULL, NULL);
     SDL_RenderPresent(cb_ctx->renderer);
-    cb_ctx->ver_cnt = 0;
+    cb_ctx->ver_cnt++;;
   }
+
+  if (cb_ctx->ver_cnt == cb_ctx->width)
+    cb_ctx->ver_cnt = 0;
 
   // Take an opportunity to poll for events.
   vgasim_events();
@@ -209,13 +146,6 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
 }
 
 static int vgasim_init_calltf(char *user_data) {
-#if !SA_EXCLUDE
-  if (surface) {
-    vpi_printf("WARNING: Don't call $vgasimInit more than once\n");
-    return 0;
-  }
-#endif
-
   pixel_clock_cb_data_t *cb_ctx = calloc(1, sizeof(pixel_clock_cb_data_t));
   if (!cb_ctx)
   {
@@ -238,7 +168,7 @@ static int vgasim_init_calltf(char *user_data) {
   vpi_get_value(arg, &argval);
   cb_ctx->heigh = argval.value.integer;
 
-  cb_ctx->video_buffer = calloc(cb_ctx->width * cb_ctx->heigh,
+  cb_ctx->video_buffer = calloc(cb_ctx->width,
                                 sizeof(*cb_ctx->video_buffer));
   if (!cb_ctx->video_buffer)
   {
@@ -298,6 +228,17 @@ static int vgasim_init_calltf(char *user_data) {
 
   cb_ctx->texture = texture;
 
+  cb_ctx->hor_back_porch_start  = vga_standard.hor_sync_pulse;
+  cb_ctx->hor_data_start        = cb_ctx->hor_back_porch_start +
+                                  vga_standard.hor_back_porch;
+  cb_ctx->hor_front_porch_start = cb_ctx->hor_data_start + 
+                                  vga_standard.hor_res;
+  cb_ctx->ver_back_porch_start  = vga_standard.ver_sync_pulse;
+  cb_ctx->ver_data_start        = cb_ctx->ver_back_porch_start +
+                                  vga_standard.ver_back_porch;
+  cb_ctx->ver_front_porch_start = cb_ctx->ver_data_start + 
+                                  vga_standard.ver_res;
+
   s_cb_data cb_config;
   s_vpi_time time;
   time.type = vpiSimTime;
@@ -309,11 +250,6 @@ static int vgasim_init_calltf(char *user_data) {
   cb_config.obj = cb_ctx->pclk;
   vpi_register_cb(&cb_config);
   time.type = vpiSimTime;
-
-#if !SA_EXCLUDE
-  argval.format = vpiObjTypeVal;
-  vpi_get_value(r, &argval);
-#endif
 
   cb_ctx->rmax = 1 << vpi_get(vpiSize, cb_ctx->red);
   cb_ctx->gmax = 1 << vpi_get(vpiSize, cb_ctx->green);

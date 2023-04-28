@@ -3,16 +3,15 @@
 
 typedef struct 
 {
-  uint32_t pixel_freq;
-  uint16_t hor_res;
-  uint16_t hor_front_porch;
-  uint16_t hor_sync_pulse;
-  uint16_t hor_back_porch;
-  uint16_t ver_res;
-  uint16_t ver_front_porch;
-  uint16_t ver_sync_pulse;
-  uint16_t ver_back_porch;
-  char     id;
+  char     *id;
+  uint32_t hor_res;
+  uint32_t hor_front_porch;
+  uint32_t hor_sync_pulse;
+  uint32_t hor_back_porch;
+  uint32_t ver_res;
+  uint32_t ver_front_porch;
+  uint32_t ver_sync_pulse;
+  uint32_t ver_back_porch;
 } vga_standard_t;
 
 extern const vga_standard_t vga_standard_list[];

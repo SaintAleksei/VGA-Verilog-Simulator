@@ -1,54 +1,54 @@
 // This is a simulation-only example of generating a VGA-like pixel clock video
 // signal.
+`timescale 1ns/1ns
 
 module vgasimdemo;
-   reg pclk;
-   reg [4:0] r;
-   reg [4:0] g;
-   reg [4:0] b;
-   reg hsync;
-   reg vsync;
-   reg [19:0] x;
-   reg [19:0] y;
-   reg [4:0]  mask;
+  reg clk;
+  wire [7:0] r;
+  wire [7:0] g;
+  wire [7:0] b;
+  reg [15:0] hcnt;
+  reg [15:0] vcnt;
 
-   localparam dots_per_line = 800 + 40 + 128 + 88;
-   localparam lines_per_frame = 600 + 1 + 4 + 23;
+  localparam HOR_BACK_PORCH_START = 96;
+  localparam HOR_DATA_START  = HOR_BACK_PORCH_START + 48;
+  localparam HOR_FRONT_START = HOR_DATA_START + 640;
+  localparam HOR_MAX         = HOR_FRONT_START + 16;
+  localparam VER_BACK_PORCH_START = 2;
+  localparam VER_DATA_START  = HOR_BACK_PORCH_START + 33;
+  localparam VER_FRONT_START = HOR_DATA_START + 480;
+  localparam VER_MAX         = VER_FRONT_START + 10;
 
-   wire       in_screen = (x < 800 && y < 600);
 
-   initial begin
-      x = 0;
-      y = 0;
-      pclk = 0;
-      hsync = 1;
-      vsync = 1;
-      mask = 0;
+  assign r = hcnt[7:0];
+  assign g = hcnt[7:0];
+  assign b = 8'b0;
 
-      $vgasimInit(
-          dots_per_line,
-          lines_per_frame,
-          r, g, b,
-          hsync, vsync,
-          pclk
-      );
-   end
+  wire hsync = (hcnt >= HOR_BACK_PORCH_START);
+  wire vsync = (vcnt >= VER_BACK_PORCH_START);
 
-   always @(negedge pclk) begin
-      r <= in_screen ? (~x) ^ mask : 0;
-      g <= in_screen ? y ^ mask : 0;
-      b <= in_screen ? 0 : 0;
+  always @(posedge clk) 
+  begin
+    hcnt <= (hcnt == HOR_MAX - 1) ? 0 : hcnt + 1;
+    vcnt <= (hcnt != HOR_MAX - 1) ? vcnt :
+            (vcnt == VER_MAX - 1) ? 0 : vcnt + 1;
+    $display("demo: %d;%d;%d;%d\n", hcnt, vcnt, hsync, vsync);
+  end
 
-      x <= (x == dots_per_line ? 0 : x + 1);
+  initial 
+  begin
+    hcnt = 0;
+    vcnt = 0;
+    clk = 0;
 
-      if (x == dots_per_line)
-        y <= (y == lines_per_frame ? 0 : y + 1);
+    $vgasimInit(
+      640,
+      480,
+      r, g, b,
+      hsync, vsync,
+      clk
+    );
+  end
 
-      mask <= (y == lines_per_frame) ? mask + 1 : mask;
-
-      hsync <= ~(x >= 840 && x < 968);
-      vsync <= ~(y >= 601 && y < 615);
-   end
-
-   always #1 pclk = ~pclk;
+  always #1 clk = ~clk;
 endmodule
