@@ -47,6 +47,10 @@ typedef struct
   uint32_t ver_data_start;
   uint32_t ver_front_porch_start;
   uint32_t ver_max;
+#define SYNC_RESET     0
+#define SYNC_COMPLETED 1
+#define SYNC_WAITING   2
+  uint32_t sync_state;
 } pixel_clock_cb_data_t;
 
 static void vgasim_events() {
@@ -84,20 +88,35 @@ static int vgasim_pixel_cb(s_cb_data *cb_data) {
   vpi_get_value(cb_ctx->vsync, &value);
   vsync = value.value.integer;
 
-#if 0
-  vpi_printf("vgasim: %d;%d;%d;%d;\n", cb_ctx->hor_cnt, cb_ctx->ver_cnt, hsync, vsync);
-#endif
+  if (cb_ctx->sync_state == SYNC_RESET)
+  {
+    vpi_printf("vgasim: waiting for sync pulses\n");
+    cb_ctx->sync_state = SYNC_WAITING;
+  }
 
-  // Check for VGA standard, reset if failed
   if ((cb_ctx->hor_cnt < cb_ctx->hor_back_porch_start && hsync)   ||
       (cb_ctx->hor_cnt >= cb_ctx->hor_back_porch_start && !hsync) ||
       (cb_ctx->ver_cnt < cb_ctx->ver_back_porch_start && vsync)   ||
       (cb_ctx->ver_cnt >= cb_ctx->ver_back_porch_start && !vsync))
   {
+    if (cb_ctx->sync_state == SYNC_COMPLETED)
+    {
+      vpi_printf("vgasim: bad sync signals; restart sync\n");
+      cb_ctx->sync_state = SYNC_RESET;
+    }
+
     cb_ctx->hor_cnt = 0;
     cb_ctx->ver_cnt = 0; 
 
     return 0;
+  }
+
+  if (cb_ctx->sync_state == SYNC_WAITING &&
+      cb_ctx->hor_cnt == cb_ctx->hor_back_porch_start &&
+      cb_ctx->ver_cnt == cb_ctx->ver_back_porch_start)
+  {
+    vpi_printf("vgasim: sync completed\n");
+    cb_ctx->sync_state = SYNC_COMPLETED;
   }
 
   if ((cb_ctx->hor_cnt >= cb_ctx->hor_data_start        &&
@@ -152,7 +171,7 @@ static int vgasim_init_calltf(char *user_data) {
   pixel_clock_cb_data_t *cb_ctx = calloc(1, sizeof(pixel_clock_cb_data_t));
   if (!cb_ctx)
   {
-    vpi_printf("ERROR: Can\'t allocate memory for context\n");
+    vpi_printf("vgasim: ERROR: Can\'t allocate memory for context\n");
     return 0;
   }
 
@@ -164,18 +183,14 @@ static int vgasim_init_calltf(char *user_data) {
 
   argval.format = vpiIntVal;
 
-  arg = vpi_scan(args_iter);
-  vpi_get_value(arg, &argval);
-  cb_ctx->width = argval.value.integer;
-  arg = vpi_scan(args_iter);
-  vpi_get_value(arg, &argval);
-  cb_ctx->heigh = argval.value.integer;
+  cb_ctx->width = vga_standard.hor_res;
+  cb_ctx->heigh = vga_standard.ver_res;
 
   cb_ctx->video_buffer = calloc(cb_ctx->width,
                                 sizeof(*cb_ctx->video_buffer));
   if (!cb_ctx->video_buffer)
   {
-    vpi_printf("ERROR: Can\'t allocate memory for video buffer\n");
+    vpi_printf("vgasim: ERROR: Can\'t allocate memory for video buffer\n");
     free(cb_ctx);
     return 0;
   }
@@ -196,7 +211,7 @@ static int vgasim_init_calltf(char *user_data) {
                                         SDL_WINDOW_SHOWN);
   if (!window)
   {
-    vpi_printf("ERROR: Can\'t create window\n");
+    vpi_printf("vgasim: ERROR: Can\'t create window\n");
     free(cb_ctx->video_buffer);
     free(cb_ctx);
     return 0;
@@ -207,7 +222,7 @@ static int vgasim_init_calltf(char *user_data) {
   SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   if (!renderer)
   {
-    vpi_printf("ERROR: Can\'t create renderer\n");
+    vpi_printf("vgasim: ERROR: Can\'t create renderer\n");
     SDL_DestroyWindow(cb_ctx->window);
     free(cb_ctx->video_buffer);
     free(cb_ctx);
@@ -221,7 +236,7 @@ static int vgasim_init_calltf(char *user_data) {
                                            cb_ctx->width, cb_ctx->heigh);
   if (!texture)
   {
-    vpi_printf("ERROR: Can\'t create texture\n");
+    vpi_printf("vgasim: ERROR: Can\'t create texture\n");
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     free(cb_ctx->video_buffer);
@@ -271,7 +286,7 @@ void vgasim_register() {
   s_vpi_systf_data config;
 
   config.type = vpiSysTask;
-  config.tfname = "$vgasimInit";
+  config.tfname = "$vgasim";
   config.calltf = vgasim_init_calltf;
   config.compiletf = NULL;
   config.sizetf = 0;

@@ -32,7 +32,6 @@ module vgasimdemo;
     hcnt <= (hcnt == HOR_MAX - 1) ? 0 : hcnt + 1;
     vcnt <= (hcnt != HOR_MAX - 1) ? vcnt :
             (vcnt == VER_MAX - 1) ? 0 : vcnt + 1;
-    //$display("demo: %d;%d;%d;%d\n", hcnt, vcnt, hsync, vsync);
   end
 
   initial 
@@ -41,9 +40,7 @@ module vgasimdemo;
     vcnt = 0;
     clk = 0;
 
-    $vgasimInit(
-      640,
-      480,
+    $vgasim(
       r, g, b,
       hsync, vsync,
       clk
