@@ -10,19 +10,19 @@ module vgasimdemo;
   reg [15:0] hcnt;
   reg [15:0] vcnt;
 
-  localparam HOR_BACK_PORCH_START = 96;
-  localparam HOR_DATA_START  = HOR_BACK_PORCH_START + 48;
-  localparam HOR_FRONT_START = HOR_DATA_START + 640;
-  localparam HOR_MAX         = HOR_FRONT_START + 16;
-  localparam VER_BACK_PORCH_START = 2;
-  localparam VER_DATA_START  = HOR_BACK_PORCH_START + 33;
-  localparam VER_FRONT_START = HOR_DATA_START + 480;
-  localparam VER_MAX         = VER_FRONT_START + 10;
+  localparam HOR_BACK_PORCH_START = 192;
+  localparam HOR_DATA_START  = HOR_BACK_PORCH_START + 304;
+  localparam HOR_FRONT_START = HOR_DATA_START + 1600;
+  localparam HOR_MAX         = HOR_FRONT_START + 64;
+  localparam VER_BACK_PORCH_START = 3;
+  localparam VER_DATA_START  = HOR_BACK_PORCH_START + 46;
+  localparam VER_FRONT_START = HOR_DATA_START + 1200;
+  localparam VER_MAX         = VER_FRONT_START + 1;
 
 
   assign r = hcnt[7:0];
-  assign g = hcnt[7:0];
-  assign b = 8'b0;
+  assign b = vcnt[7:0];
+  assign g = 8'b0;
 
   wire hsync = (hcnt >= HOR_BACK_PORCH_START);
   wire vsync = (vcnt >= VER_BACK_PORCH_START);
@@ -41,6 +41,7 @@ module vgasimdemo;
     clk = 0;
 
     $vgasim(
+      "1600x1200_60Hz",
       r, g, b,
       hsync, vsync,
       clk
