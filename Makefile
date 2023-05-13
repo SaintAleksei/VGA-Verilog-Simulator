@@ -1,18 +1,32 @@
+TARGET			:= vgasim
+
+CCOMP				:= iverilog-vpi
+SOURCES     := vgasim.c vga_standard.c
 SDL_LDFLAGS := $(shell sdl2-config --libs)
 SDL_CCFLAGS := $(shell sdl2-config --cflags)
-CCFLAGS     := -I.
-VVPFLAGS    := -M. -mvgasim
+CFLAGS      := -I.
 
-all: vgasim.vpi
+VCOMP			  := iverilog
+VFLAGS			:= 
 
-demo: demo.vvp vgasim.vpi
-	vvp $(VVPFLAGS) $<
+CLEANEXT 		:= o d vpi vvp vcd
 
-%.vpi: %.c
-	iverilog-vpi $< $(SDL_CCFLAGS) $(CCFLAGS) $(SDL_LDFLAGS)
+.PHONY: all clean requirements
+
+all: requirements $(TARGET)
+
+requirements: #TODO
+
+demo: demo.vvp $(TARGET)
+	vvp -M. -m$(TARGET) $<
+
+$(TARGET): $(SOURCES)
+	$(CCOMP) $(SDL_CCFLAGS) $(CFLAGS) $^ $(SDL_LDFLAGS)
 
 %.vvp: %.v
-	iverilog $< -o $@
+	$(VCOMP) $(VFLAGS) $< -o $@
 
 clean:
-	rm -rf *.o *.vpi *.vvp
+	rm -rf $(addprefix *.,$(CLEANEXT))
+
+-include $(patsubst %.o,%.d,$(OBJECTS))
