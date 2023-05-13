@@ -7,21 +7,9 @@
 
 #include <vga_standard.h>
 
-const vga_standard_t vga_standard =
-{
-  .id = "640x480_60Hz",
-  .hor_res = 640,
-  .ver_res = 480,
-  .hor_front_porch = 16,
-  .hor_sync_pulse = 96,
-  .hor_back_porch = 48,
-  .ver_front_porch = 10,
-  .ver_sync_pulse = 2,
-  .ver_back_porch = 33
-};
-
 typedef struct
 {
+  vga_standard_t *vga_standard;
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *texture;
@@ -181,10 +169,36 @@ static int vgasim_init_calltf(char *user_data) {
   systfref = vpi_handle(vpiSysTfCall, NULL);
   args_iter = vpi_iterate(vpiArgument, systfref);
 
-  argval.format = vpiIntVal;
+  // SA: Find requred VGA standard; use first in list if not found
+  arg = vpi_scan(args_iter);
+  argval.format = vpiStringVal;
+  vpi_get_value(arg, &argval);
+  char *vga_standard_name = argval.value.str;
 
-  cb_ctx->width = vga_standard.hor_res;
-  cb_ctx->heigh = vga_standard.ver_res;
+  if (!vga_standard_name)
+  {
+    vpi_printf("vgasim: ERROR: Bad name of VGA standard\n");
+    free(cb_ctx);
+    return 0;
+  }
+
+  cb_ctx->vga_standard = (vga_standard_t *) vga_standard_list;
+  for (size_t i = 0; i < VGA_STANDARD_LIST_SIZE; ++i)
+  {
+    if (!vga_standard_list[i].id)
+    {
+      break;
+    }
+    if (!strcmp(vga_standard_list[i].id, vga_standard_name))
+    {
+      cb_ctx->vga_standard = vga_standard_list + i;
+      break;
+    }
+  }
+  vpi_printf("vgasim: using VGA standard \"%s\"\n", cb_ctx->vga_standard->id);
+
+  cb_ctx->width = cb_ctx->vga_standard->hor_res;
+  cb_ctx->heigh = cb_ctx->vga_standard->ver_res;
 
   cb_ctx->video_buffer = calloc(cb_ctx->width,
                                 sizeof(*cb_ctx->video_buffer));
@@ -246,20 +260,22 @@ static int vgasim_init_calltf(char *user_data) {
 
   cb_ctx->texture = texture;
 
-  cb_ctx->hor_back_porch_start  = vga_standard.hor_sync_pulse;
+  cb_ctx->hor_back_porch_start  = cb_ctx->vga_standard->hor_sync_pulse;
   cb_ctx->hor_data_start        = cb_ctx->hor_back_porch_start +
-                                  vga_standard.hor_back_porch;
+                                  cb_ctx->vga_standard->hor_back_porch;
   cb_ctx->hor_front_porch_start = cb_ctx->hor_data_start + 
-                                  vga_standard.hor_res;
+                                  cb_ctx->vga_standard->hor_res;
   cb_ctx->hor_max               = cb_ctx->hor_front_porch_start +
-                                  vga_standard.hor_front_porch;
-  cb_ctx->ver_back_porch_start  = vga_standard.ver_sync_pulse;
+                                  cb_ctx->vga_standard->hor_front_porch;
+  cb_ctx->ver_back_porch_start  = cb_ctx->vga_standard->ver_sync_pulse;
   cb_ctx->ver_data_start        = cb_ctx->ver_back_porch_start +
-                                  vga_standard.ver_back_porch;
+                                  cb_ctx->vga_standard->ver_back_porch;
   cb_ctx->ver_front_porch_start = cb_ctx->ver_data_start + 
-                                  vga_standard.ver_res;
+                                  cb_ctx->vga_standard->ver_res;
   cb_ctx->ver_max               = cb_ctx->ver_front_porch_start +
-                                  vga_standard.ver_front_porch;
+                                  cb_ctx->vga_standard->ver_front_porch;
+
+  argval.format = vpiIntVal;
 
   s_cb_data cb_config;
   s_vpi_time time;

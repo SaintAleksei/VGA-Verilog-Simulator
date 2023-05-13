@@ -1,6 +1,8 @@
 #ifndef VGA_STANDARD_H_INCLUDED
 #define VGA_STANDARD_H_INCLUDED 1
 
+#define VGA_STANDARD_LIST_SIZE 32
+
 typedef struct 
 {
   char     *id;
